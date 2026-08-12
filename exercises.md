@@ -309,50 +309,49 @@ verbosity bias và self-preference bằng cách nào?
 
 ### Exercise 3.4 — Framework Comparison (Bonus +10)
 
-Chỉ làm sau khi hoàn thành 3.1–3.3. Chọn hai framework trong RAGAS, DeepEval
-và TruLens; chạy hoặc thiết kế một so sánh có cùng input dataset.
+**Frameworks so sánh:** RAGAS vs. DeepEval, áp dụng trên cùng golden dataset (20 QA) và cùng `artifacts/actual_answers.json` đã sinh trong Exercise 3.2.
 
-| Tiêu chí | Framework 1: ____ | Framework 2: ____ |
+| Tiêu chí | Framework 1: RAGAS | Framework 2: DeepEval |
 |---|---|---|
-| Setup complexity | | |
-| Metrics available | | |
-| CI/CD integration | | |
-| Kết quả trên cùng dataset | | |
-| Insight rút ra | | |
+| Setup complexity | Cần cấu hình LLM provider cho từng metric (`Faithfulness`, `AnswerRelevancy`, `ContextRecall`, `ContextPrecision`), map field của `QAPair`/`EvalResult` sang `EvaluationDataset`/`SingleTurnSample` của RAGAS — tốn công refactor vì schema khác với `template.py` (RAGAS cần `retrieved_contexts` là list, `reference` thay vì `expected_answer`). Không cần viết test riêng, chạy qua notebook/script trực tiếp. | Thiết kế "pytest-native": mỗi QA pair map thành một `LLMTestCase`, mỗi metric (`FaithfulnessMetric`, `AnswerRelevancyMetric`, `ContextualRecallMetric`) là một assertion trong `assert_test()`. Tích hợp gần như không cần thay đổi gì nếu team đã dùng `pytest` — đúng với repo lab này (`tests/test_solution.py` đã chạy bằng `pytest`), nên chi phí setup thấp hơn RAGAS trong bối cảnh cụ thể của lab. |
+| Metrics available | Bộ metric RAG-specific rất đầy đủ và chuẩn hóa theo đúng 4 metric của lab (Faithfulness, Answer Relevancy, Context Recall, Context Precision) — gần khớp 1-1 với `RAGASEvaluator` đã implement, chỉ khác là RAGAS dùng LLM-as-judge cho từng metric thay vì word-overlap heuristic. | Có cùng nhóm RAG metrics (Faithfulness, Answer Relevancy, Contextual Recall/Precision) cộng thêm các metric ngoài RAG như `HallucinationMetric`, `ToxicityMetric`, `BiasMetric`, `GEval` (custom rubric tự nhiên ngôn ngữ) — hữu ích cho việc mở rộng bộ safety-check cho case Adversarial (A01–A03) mà `RAGASEvaluator` hiện tại của lab không có sẵn. |
+| CI/CD integration | Không thiết kế sẵn cho pytest; muốn chặn deploy cần tự viết wrapper script gọi `evaluate()` rồi so sánh threshold thủ công (tương tự cách `run_regression()` trong `template.py` đang làm). | Tích hợp CI/CD gần như miễn phí nhờ `assert_test()` — build pipeline chỉ cần `pytest --deepeval` là có báo cáo pass/fail per-metric, phù hợp trực tiếp làm quality gate như Exercise 1.3 đã thiết kế threshold. |
+| Kết quả trên cùng dataset | Dự kiến faithfulness/relevance của 16 case Easy–Hard sẽ **tăng** so với heuristic hiện tại (0.648 trung bình), vì LLM-judge của RAGAS hiểu được paraphrase hợp lệ (vd. case H04 hiện bị heuristic chấm faithfulness 0.364 dù context_recall 0.821 — LLM-judge nhiều khả năng chấm cao hơn vì nội dung đúng). | Dự kiến tương tự RAGAS về xu hướng tăng điểm cho case paraphrase hợp lệ; điểm khác biệt lớn nhất dự kiến nằm ở 3 case Adversarial (A01–A03): DeepEval's `GEval`/custom rubric có thể được cấu hình để chấm riêng "có tuân thủ guardrail hay không" tách khỏi lexical overlap với expected_answer, nên A02 (agent từ chối đúng nhưng ngắn) nhiều khả năng được DeepEval chấm cao hơn nhiều so với cả heuristic hiện tại lẫn RAGAS mặc định. |
+| Insight rút ra | RAGAS mạnh khi cần metric RAG chuẩn hóa, dễ so sánh cross-project vì là "industry benchmark", nhưng thiếu linh hoạt để mã hóa rule domain-specific (như "không được guarantee scholarship renewal"). | DeepEval mạnh hơn ở khả năng tùy biến rubric (`GEval`) để bắt đúng các domain rule (an toàn, guardrail) và tích hợp CI/CD liền mạch — phù hợp hơn cho giai đoạn production của hệ thống Student Services, nơi cluster lỗi nghiêm trọng nhất (Cluster 1 trong `reflection.md`) là vấn đề guardrail chứ không phải RAG metric thuần túy. |
 
-- Scores có nhất quán không?
-- Framework nào strict hơn và vì sao?
-- Hai framework có tìm ra cùng failure cases không?
-
-> *Phân tích:*
+- **Scores có nhất quán không?** Dự kiến **không hoàn toàn nhất quán**, đặc biệt ở 2 nhóm case: (1) case paraphrase hợp lệ (H04, M06, M02...) — cả hai framework LLM-judge đều được kỳ vọng chấm cao hơn heuristic hiện tại và gần giống nhau giữa RAGAS/DeepEval vì cùng dựa trên semantic judgement; (2) case Adversarial (A01–A03) — hai framework nhiều khả năng lệch nhau nhiều nhất, vì RAGAS dùng metric RAG chuẩn (không có khái niệm "guardrail compliance"), còn DeepEval có thể tùy biến rubric riêng để chấm đúng hành vi an toàn.
+- **Framework nào strict hơn và vì sao?** RAGAS được dự đoán **strict hơn** cho case Adversarial, vì các metric mặc định (Faithfulness/Relevancy) của RAGAS vẫn đo theo logic "answer có bám sát context/question không" — với A01/A03 nơi context bị retrieval sai, RAGAS vẫn sẽ chấm thấp tương tự heuristic hiện tại vì không có cơ chế tách riêng "an toàn" khỏi "bám context". DeepEval lỏng hơn (dễ chấm cao hơn) cho các case này nếu có custom `GEval` rubric kiểm tra đúng hành vi an toàn thay vì chỉ đo lexical/semantic overlap.
+- **Hai framework có tìm ra cùng failure cases không?** Dự kiến **có trùng lặp một phần**: cả hai đều sẽ tiếp tục gắn cờ A01, A03 là có vấn đề (vì retrieval thật sự thiếu evidence — context_recall thấp không phụ thuộc vào framework nào), nhưng RAGAS nhiều khả năng vẫn fail A02 tương tự heuristic hiện tại (do thiếu semantic tách bạch an toàn/nội dung), trong khi DeepEval với `GEval` rubric tùy biến có thể **không** gắn cờ A02 là fail — cho thấy framework đánh giá càng gần với domain rule thực tế thì càng giảm false-negative trên case behaviorally-correct-nhưng-terse như A02.
+---
 
 ### Exercise 3.5 — Retrieval Reranking (Bonus +5)
 
-Mục tiêu: kiểm tra việc đổi thứ tự chunks có tăng Context Precision mà không
-thay đổi Context Recall hay không.
-
-1. Chọn ít nhất 5 cases từ `artifacts/actual_answers.json`.
-2. Tính Context Recall và Context Precision trước rerank.
-3. Implement `rerank_by_overlap()` hoặc một reranker khác.
-4. Rerank cùng tập chunks, không thêm hoặc xóa chunk.
-5. Tính lại hai metrics và giải thích kết quả.
+**Phương pháp:** Lấy `retrieved_contexts` thật (5 chunk theo đúng thứ tự BM25 trả về) từ `artifacts/actual_answers.json` của 5 case đại diện: **E01** (Easy, retrieval tốt), **M06** (Medium, có noise nhẹ), **H01** (Hard, retrieval tốt), **A01** và **A03** (Adversarial, retrieval thất bại — 2 case tệ nhất benchmark). Tính Context Recall/Precision **trước** rerank bằng đúng `RAGASEvaluator` trong `template.py`, sau đó chạy `rerank_by_overlap()` (đã implement ở Task 2 — sort theo overlap từ vựng với `expected_answer`, giữ nguyên tập chunk), rồi tính lại hai metric.
 
 | ID | Recall before | Recall after | Precision before | Precision after | Delta Precision |
 |---|---:|---:|---:|---:|---:|
-| | | | | | |
-| | | | | | |
-| | | | | | |
-| | | | | | |
-| | | | | | |
-| **Avg** | | | | | |
+| E01 | 0.939 | 0.939 | 1.000 | 1.000 | +0.000 |
+| M06 | 1.000 | 1.000 | 0.950 | 1.000 | +0.050 |
+| H01 | 0.900 | 0.900 | 1.000 | 1.000 | +0.000 |
+| A01 | 0.286 | 0.286 | 0.500 | 1.000 | +0.500 |
+| A03 | 0.360 | 0.360 | 0.804 | 1.000 | +0.196 |
+| **Avg** | **0.697** | **0.697** | **0.851** | **1.000** | **+0.149** |
+
+Đã verify bằng code: `set(chunks) == set(reranked)` đúng cho cả 5 case — reranking chỉ đổi **thứ tự**, không thêm/bớt chunk nào, nên union coverage giữ nguyên hoàn toàn.
 
 **Tại sao Recall dự kiến không đổi?**
 
-> *Câu trả lời:*
+> Context Recall được tính trên **union** của toàn bộ chunk đã retrieve (`|expected ∩ union(chunks)| / |expected|`), không phụ thuộc vào thứ tự chunk trong danh sách. Vì `rerank_by_overlap()` chỉ sắp xếp lại vị trí các chunk hiện có mà không thêm/bớt chunk nào, tập hợp union hoàn toàn giữ nguyên trước và sau rerank — do đó recall trước/sau bằng nhau tuyệt đối ở cả 5/5 case (không chỉ gần bằng, mà giống hệt nhau đến từng chữ số), đúng như kỳ vọng lý thuyết.
+ 
+**Kết quả thực tế cho thấy điều gì?**
+ 
+> Precision cải thiện rõ rệt nhất ở đúng 2 case tệ nhất benchmark — **A01 (+0.500, từ 0.500 lên 1.000)** và **A03 (+0.196, từ 0.804 lên 1.000)** — vì trong 5 chunk retrieved, chunk có overlap từ vựng cao nhất với expected_answer bị BM25 xếp ở vị trí giữa/cuối thay vì đầu, nên reranking theo overlap kéo được đúng chunk quan trọng nhất lên đầu ranking. M06 cũng cải thiện nhẹ (+0.050) vì 1 chunk noise nhẹ bị đẩy xuống dưới. Ngược lại, E01 và H01 không đổi vì precision đã đạt tối đa (1.000) từ trước — không còn dư địa cải thiện.
+>
+> Tuy nhiên, cần lưu ý: `rerank_by_overlap()` dùng chính `expected_answer` (không phải `question`) để tính overlap trong bài test — đây là cách làm hợp lệ cho mục đích phân tích retrospective (đo xem nếu ranking "biết trước" đáp án thì precision tối đa có thể đạt bao nhiêu), nhưng **không thể dùng trực tiếp trong production** vì hệ thống thật không có `expected_answer` tại thời điểm truy vấn — đây chỉ là thượng cận (upper bound) để đánh giá tiềm năng của reranking, không phải giải pháp triển khai được ngay.
 
 **Khi nào reranking không đủ và cần sửa retriever/query/chunking?**
 
-> *Câu trả lời:*
+> Reranking chỉ **sắp xếp lại** những gì đã được retrieve — nó không thể thêm evidence còn thiếu vào union. Với A01 và A03, dù precision đã đạt 1.000 sau rerank, **Context Recall vẫn giữ nguyên ở mức rất thấp (0.286 và 0.360)** — nghĩa là đoạn evidence quan trọng nhất (`00_system_scope.md` guardrail) hoàn toàn **không nằm trong 5 chunk được retrieve ngay từ đầu**, nên không có thứ tự sắp xếp nào có thể "tạo ra" evidence còn thiếu. Đây chính xác là trường hợp reranking không đủ: khi Recall thấp (retriever bỏ sót evidence), phải sửa ở tầng retriever/query/chunking (tăng top-k, cải thiện embedding/BM25 tokenization cho các đoạn guardrail ngắn, hoặc — như đề xuất ở `reflection.md` — luôn force-inject `00_system_scope.md` vào context bất kể ranking), chứ không thể giải quyết chỉ bằng cách rerank tập chunk đã có sẵn.
 
 ---
 
